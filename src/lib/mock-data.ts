@@ -1,6 +1,7 @@
 import type {
   EmailDraft,
   LeadCategory,
+  OpeningStatus,
   PriceTier,
   Restaurant,
   ScoreBreakdown,
@@ -132,7 +133,8 @@ export function haversineKm(a: [number, number], b: [number, number]): number {
 // full Restaurant objects with computed scores.
 // =============================================================================
 
-// Compact record shape stored in the JSON file.
+// Compact record shape stored in public/london-restaurants.json.
+// Fields populated by fetch-fsa.mjs; Google Places fields only present after enrichment.
 export interface RawVenue {
   id: string;
   name: string;
@@ -141,25 +143,45 @@ export interface RawVenue {
   borough: string;
   latitude: number;
   longitude: number;
-  phone?: string;
   hygieneRating?: number;
   cuisineType: string;
   priceTier: PriceTier;
+  // Google Places enrichment (present once the refresh script has run with a key)
+  phone?: string;
+  website?: string;
+  googlePlaceId?: string;
+  businessStatus?: string; // 'OPERATIONAL' | 'CLOSED_TEMPORARILY' | 'CLOSED_PERMANENTLY'
+  enrichedAt?: string;     // ISO date of last Places enrichment attempt
+  // Timestamps written by the refresh script
+  firstSeenDate?: string;  // ISO date first appeared in FSA
+  lastSeenDate?: string;   // ISO date last confirmed in FSA
 }
 
 export function hydrateVenue(raw: RawVenue): Restaurant {
   const score = scoreRestaurant(raw.cuisineType, raw.priceTier);
   const insideDeliveryArea =
     haversineKm(DELIVERY_CENTER, [raw.latitude, raw.longitude]) <= DELIVERY_RADIUS_KM;
+
+  // Derive opening status from Google business_status and firstSeenDate
+  let openingStatus: OpeningStatus = "open";
+  if (
+    raw.businessStatus === "CLOSED_PERMANENTLY" ||
+    raw.businessStatus === "CLOSED_TEMPORARILY"
+  ) {
+    openingStatus = "closed";
+  } else if (raw.firstSeenDate) {
+    const daysSince = (Date.now() - new Date(raw.firstSeenDate).getTime()) / 86_400_000;
+    if (daysSince <= 7) openingStatus = "new_this_week";
+  }
+
   return {
     ...raw,
     businessType: "Restaurant",
-    website: undefined,
     email: undefined,
-    openingStatus: "open",
-    firstSeenDate: "2026-02-12",
-    lastSeenDate: "2026-06-29",
-    source: "Food Standards Agency",
+    openingStatus,
+    firstSeenDate: raw.firstSeenDate ?? "2026-02-12",
+    lastSeenDate:  raw.lastSeenDate  ?? "2026-06-29",
+    source: raw.googlePlaceId ? "FSA + Google Places" : "Food Standards Agency",
     existingCustomer: false,
     excluded: score.excluded,
     insideDeliveryArea,
