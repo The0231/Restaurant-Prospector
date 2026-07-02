@@ -36,7 +36,8 @@ export const CUISINES: { name: string; compat: number }[] = [
   { name: "Seafood", compat: 0.5 },
   { name: "Steakhouse", compat: 0.48 },
   { name: "Vegan / Plant-based", compat: 0.45 },
-  { name: "Other / Unknown", compat: 0.3 },
+  { name: "Other / Unknown", compat: 0.4 }, // legacy label — fix-cuisine.mjs renames these to "Other"
+  { name: "Other", compat: 0.4 },
   { name: "Middle Eastern", compat: 0.2 }, // Lebanese/Turkish/Persian — NOT a fit
   { name: "Cafe / Coffee", compat: 0.2 },
   { name: "Indian", compat: 0.2 },
@@ -60,7 +61,7 @@ export function cuisineCompatibility(cuisine: string): number {
 }
 
 export function categoryForScore(score: number): LeadCategory {
-  if (score >= 80) return "high";
+  if (score >= 75) return "high";
   if (score >= 60) return "good";
   if (score >= 40) return "possible";
   return "low";
@@ -149,6 +150,8 @@ export interface RawVenue {
   // Google Places enrichment (present once the refresh script has run with a key)
   phone?: string;
   website?: string;
+  menuSummary?: string;    // populated by scripts/fetch-menus.mjs
+  pastaRelevance?: string; // populated by scripts/fetch-menus.mjs
   googlePlaceId?: string;
   businessStatus?: string; // 'OPERATIONAL' | 'CLOSED_TEMPORARILY' | 'CLOSED_PERMANENTLY'
   enrichedAt?: string;     // ISO date of last Places enrichment attempt

@@ -9,7 +9,7 @@ import { prepareOpenings, type ScannedOpening } from "@/lib/openings";
 import { useRestaurants } from "@/lib/store";
 
 export default function NewOpeningsPage() {
-  const { restaurants, addRestaurants, updateMany } = useRestaurants();
+  const { restaurants, addRestaurants, updateMany, updateRestaurant, londonOnly } = useRestaurants();
   const [scanning, setScanning] = useState(false);
   const [scanMsg, setScanMsg] = useState<string | null>(null);
 
@@ -17,6 +17,7 @@ export default function NewOpeningsPage() {
     () =>
       restaurants
         .filter((r) => r.openingStatus === "new_this_week" || r.openingStatus === "opening_soon")
+        .filter((r) => !r.excluded)
         .sort((a, b) => b.leadScore - a.leadScore),
     [restaurants]
   );
@@ -25,7 +26,12 @@ export default function NewOpeningsPage() {
     setScanning(true);
     setScanMsg(null);
     try {
-      const res = await fetch("/api/scan-openings", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+      // Full-UK mode scans the whole UK; London-only mode restricts to London.
+      const res = await fetch("/api/scan-openings", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ scope: londonOnly ? "london" : "uk" }),
+      });
       const data = await res.json();
       if (data.error) {
         setScanMsg(data.error === "no_api_key" ? "Add an API key to enable web scanning." : `Scan failed: ${data.message || data.error}`);
@@ -41,6 +47,12 @@ export default function NewOpeningsPage() {
     } finally {
       setScanning(false);
     }
+  }
+
+  // Drop a venue from the New openings view (keeps the record; a later scan
+  // won't re-flag it as new — see prepareOpenings).
+  function removeAsNew(id: string) {
+    updateRestaurant(id, { openingStatus: "open", dismissedAsNew: true });
   }
 
   return (
@@ -92,13 +104,20 @@ export default function NewOpeningsPage() {
             <div className="flex flex-col items-end gap-2">
               <OutreachBadge status={r.outreachStatus} />
               <Link href="/emails" className="rounded-lg bg-brand-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-600">Review &amp; draft email</Link>
+              <button
+                onClick={() => removeAsNew(r.id)}
+                className="text-xs font-medium text-slate-400 hover:text-slate-600"
+                title="Keep the venue but remove it from New openings"
+              >
+                Remove as new
+              </button>
             </div>
           </div>
         ))}
         {openings.length === 0 && (
           <div className="rounded-xl bg-white p-8 text-center text-slate-400 ring-1 ring-slate-200">
             <p>No new openings tracked yet.</p>
-            <p className="mt-1 text-xs">Click “Scan the web for new openings” to find recently opened London restaurants.</p>
+            <p className="mt-1 text-xs">Click &ldquo;Scan the web for new openings&rdquo; to find recently opened restaurants.</p>
           </div>
         )}
       </div>

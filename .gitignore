@@ -26,3 +26,13 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+certificates
+certificates-lan
+
+# Base FSA dataset — hosted in Supabase Storage (36MB; refreshed weekly by
+# .github/workflows/fsa-refresh.yml). Local copy is a dev fallback only.
+/public/uk-restaurants.json
+
+# Stale local duplicate of the project (contains its own .env.local) — not source.
+/Restaurant-Prospector/

@@ -10,6 +10,8 @@ import {
   useState,
 } from "react";
 import { hydrateVenue, type RawVenue } from "./mock-data";
+import { chainKey } from "./chains";
+import { isLondon } from "./locations";
 import type { Restaurant } from "./types";
 
 // Client-side data store.
@@ -35,6 +37,10 @@ interface StoreValue {
   restaurants: Restaurant[];
   loading: boolean;
   shared: boolean; // true when backed by the shared Supabase database
+  showExcluded: boolean;
+  setShowExcluded: (v: boolean) => void;
+  londonOnly: boolean;
+  setLondonOnly: (v: boolean) => void;
   addRestaurant: (r: Restaurant) => void;
   addRestaurants: (list: Restaurant[]) => void;
   updateRestaurant: (id: string, patch: Partial<Restaurant>) => void;
@@ -58,6 +64,28 @@ export function RestaurantsProvider({ children }: { children: React.ReactNode })
   const [seedCustomers, setSeedCustomers] = useState<Set<string>>(new Set());
   const [focusIds, setFocusIds] = useState<string[] | null>(null);
   const [viewFilter, setViewFilter] = useState<ViewFilter | null>(null);
+  const [showExcluded, setShowExcludedRaw] = useState(false);
+  const [londonOnly, setLondonOnlyRaw] = useState(false);
+
+  // Hydrate settings from localStorage
+  useEffect(() => {
+    try {
+      const ex = localStorage.getItem("ltp_show_excluded");
+      if (ex !== null) setShowExcludedRaw(JSON.parse(ex));
+      const lo = localStorage.getItem("ltp_london_only");
+      if (lo !== null) setLondonOnlyRaw(JSON.parse(lo));
+    } catch { /* ignore */ }
+  }, []);
+
+  const setShowExcluded = useCallback((v: boolean) => {
+    setShowExcludedRaw(v);
+    try { localStorage.setItem("ltp_show_excluded", JSON.stringify(v)); } catch { /* ignore */ }
+  }, []);
+
+  const setLondonOnly = useCallback((v: boolean) => {
+    setLondonOnlyRaw(v);
+    try { localStorage.setItem("ltp_london_only", JSON.stringify(v)); } catch { /* ignore */ }
+  }, []);
 
   // Venues matched from the LTP customer list (public/seed-customers.json) are
   // flagged as existing customers for everyone, out of the box.
@@ -74,18 +102,43 @@ export function RestaurantsProvider({ children }: { children: React.ReactNode })
     };
   }, []);
 
-  // Fetch + hydrate the real base dataset once.
+  // Fetch + hydrate the real base dataset in chunks so the UI isn't blocked.
+  // The first 3 000 venues are shown immediately (unblocks loading state);
+  // the remaining ~17 k load silently in the background.
   useEffect(() => {
     let cancelled = false;
-    fetch("/london-restaurants.json")
+    const CHUNK = 3000;
+
+    // Prod: Supabase Storage blob (refreshed weekly). Local dev: bundled file.
+    fetch(process.env.NEXT_PUBLIC_DATASET_URL || "/uk-restaurants.json")
       .then((r) => r.json())
-      .then((data: { venues: RawVenue[] }) => {
-        if (!cancelled) setBase(data.venues.map(hydrateVenue));
+      .then(async (data: { venues: RawVenue[] }) => {
+        if (cancelled) return;
+        const all = data.venues;
+        const hydrated: Restaurant[] = [];
+
+        for (let i = 0; i < all.length; i += CHUNK) {
+          if (cancelled) return;
+          const batch = all.slice(i, i + CHUNK).map(hydrateVenue);
+          hydrated.push(...batch);
+
+          if (i === 0) {
+            // Show first batch immediately and unblock the loading state.
+            setBase([...batch]);
+            setBaseDone(true);
+          }
+
+          // Yield between chunks so the browser can paint and handle events.
+          await new Promise<void>((r) => setTimeout(r, 0));
+        }
+
+        // Replace with the full dataset once all chunks are processed.
+        if (!cancelled) setBase(hydrated);
       })
-      .catch(() => {})
-      .finally(() => {
+      .catch(() => {
         if (!cancelled) setBaseDone(true);
       });
+
     return () => {
       cancelled = true;
     };
@@ -150,10 +203,11 @@ export function RestaurantsProvider({ children }: { children: React.ReactNode })
     };
   }, [added, overrides, configured]);
 
-  // Keep shared state fresh: refetch when the tab regains focus.
+  // Keep shared state fresh: refetch when the tab regains focus, and on a slow
+  // interval so cron-added items (e.g. new openings) appear without a reload.
   useEffect(() => {
     if (configured !== true) return;
-    const onFocus = () => {
+    const refresh = () => {
       fetch("/api/data")
         .then((r) => r.json())
         .then((d) => {
@@ -164,8 +218,12 @@ export function RestaurantsProvider({ children }: { children: React.ReactNode })
         })
         .catch(() => {});
     };
-    window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
+    window.addEventListener("focus", refresh);
+    const interval = setInterval(refresh, 10 * 60 * 1000); // 10 min
+    return () => {
+      window.removeEventListener("focus", refresh);
+      clearInterval(interval);
+    };
   }, [configured]);
 
   // Fire a write to the shared DB (no-op in fallback mode).
@@ -257,8 +315,28 @@ export function RestaurantsProvider({ children }: { children: React.ReactNode })
       if (overrides[r.id]) v = { ...v, ...overrides[r.id] };
       byId.set(r.id, v);
     }
-    return Array.from(byId.values());
-  }, [added, base, overrides, seedCustomers]);
+
+    // Auto-exclude chains with 5+ London locations (too large / already have suppliers).
+    // A manual Un-exclude override on a specific venue still wins.
+    const result = Array.from(byId.values());
+    const chainCounts = new Map<string, number>();
+    for (const r of result) chainCounts.set(chainKey(r.name), (chainCounts.get(chainKey(r.name)) ?? 0) + 1);
+    const largeChains = new Set(Array.from(chainCounts.entries()).filter(([, n]) => n >= 5).map(([k]) => k));
+    if (largeChains.size) {
+      for (let i = 0; i < result.length; i++) {
+        const r = result[i];
+        if (!largeChains.has(chainKey(r.name))) continue;
+        const manuallyUnexcluded = overrides[r.id] && overrides[r.id].excluded === false;
+        const isNewOpening = r.openingStatus === "new_this_week" || r.openingStatus === "opening_soon";
+        if (!manuallyUnexcluded && !isNewOpening) result[i] = { ...r, excluded: true };
+      }
+    }
+
+    // Global setting: hide excluded venues entirely
+    const visible = showExcluded ? result : result.filter((r) => !r.excluded);
+    // Global setting: London only
+    return londonOnly ? visible.filter((r) => isLondon(r.borough)) : visible;
+  }, [added, base, overrides, seedCustomers, showExcluded, londonOnly]);
 
   const loading = !baseDone || !dataDone;
 
@@ -267,6 +345,10 @@ export function RestaurantsProvider({ children }: { children: React.ReactNode })
       restaurants,
       loading,
       shared: configured === true,
+      showExcluded,
+      setShowExcluded,
+      londonOnly,
+      setLondonOnly,
       addRestaurant,
       addRestaurants,
       updateRestaurant,
@@ -277,7 +359,7 @@ export function RestaurantsProvider({ children }: { children: React.ReactNode })
       viewFilter,
       setViewFilter,
     }),
-    [restaurants, loading, configured, addRestaurant, addRestaurants, updateRestaurant, updateMany, removeRestaurant, focusIds, viewFilter]
+    [restaurants, loading, configured, showExcluded, setShowExcluded, londonOnly, setLondonOnly, addRestaurant, addRestaurants, updateRestaurant, updateMany, removeRestaurant, focusIds, viewFilter]
   );
 
   return <RestaurantsContext.Provider value={value}>{children}</RestaurantsContext.Provider>;

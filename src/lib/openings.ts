@@ -5,6 +5,9 @@ import type { OpeningStatus, PriceTier, Restaurant } from "./types";
 export interface ScannedOpening {
   name: string;
   area?: string;
+  // UK-wide scans return the city/town (e.g. "Manchester", "Bristol"); London
+  // scans leave this blank or set it to "London".
+  city?: string;
   cuisine?: string;
   openingDate?: string;
   evidence?: string;
@@ -52,6 +55,38 @@ const AREA_GEO: Record<string, { lat: number; lng: number; borough: string }> = 
   greenwich: { lat: 51.481, lng: -0.0096, borough: "Greenwich" },
 };
 
+// Major UK cities/towns for UK-wide scans. The "borough" is the city name
+// itself — deliberately NOT a London borough — so isLondon() returns false and
+// London-only viewers don't see these, and they land on the right part of the map.
+const UK_CITY_GEO: Record<string, { lat: number; lng: number; borough: string }> = {
+  manchester: { lat: 53.4808, lng: -2.2426, borough: "Manchester" },
+  birmingham: { lat: 52.4862, lng: -1.8904, borough: "Birmingham" },
+  liverpool: { lat: 53.4084, lng: -2.9916, borough: "Liverpool" },
+  leeds: { lat: 53.8008, lng: -1.5491, borough: "Leeds" },
+  sheffield: { lat: 53.3811, lng: -1.4701, borough: "Sheffield" },
+  bristol: { lat: 51.4545, lng: -2.5879, borough: "Bristol" },
+  newcastle: { lat: 54.9783, lng: -1.6178, borough: "Newcastle" },
+  nottingham: { lat: 52.9548, lng: -1.1581, borough: "Nottingham" },
+  leicester: { lat: 52.6369, lng: -1.1398, borough: "Leicester" },
+  glasgow: { lat: 55.8642, lng: -4.2518, borough: "Glasgow" },
+  edinburgh: { lat: 55.9533, lng: -3.1883, borough: "Edinburgh" },
+  cardiff: { lat: 51.4816, lng: -3.1791, borough: "Cardiff" },
+  belfast: { lat: 54.5973, lng: -5.9301, borough: "Belfast" },
+  brighton: { lat: 50.8225, lng: -0.1372, borough: "Brighton" },
+  oxford: { lat: 51.752, lng: -1.2577, borough: "Oxford" },
+  cambridge: { lat: 52.2053, lng: 0.1218, borough: "Cambridge" },
+  bath: { lat: 51.3811, lng: -2.359, borough: "Bath" },
+  york: { lat: 53.96, lng: -1.0873, borough: "York" },
+  bournemouth: { lat: 50.7192, lng: -1.8808, borough: "Bournemouth" },
+  southampton: { lat: 50.9097, lng: -1.4044, borough: "Southampton" },
+  portsmouth: { lat: 50.8198, lng: -1.088, borough: "Portsmouth" },
+  reading: { lat: 51.4543, lng: -0.9781, borough: "Reading" },
+  plymouth: { lat: 50.3755, lng: -4.1427, borough: "Plymouth" },
+  aberdeen: { lat: 57.1497, lng: -2.0943, borough: "Aberdeen" },
+  dundee: { lat: 56.462, lng: -2.9707, borough: "Dundee" },
+  norwich: { lat: 52.6309, lng: 1.2974, borough: "Norwich" },
+};
+
 // Map a neighbourhood/area name to its borough (e.g. "Soho" → "Westminster").
 export function areaToBorough(area: string): string | null {
   const a = area.toLowerCase();
@@ -61,12 +96,24 @@ export function areaToBorough(area: string): string | null {
   return null;
 }
 
-function geocodeArea(area?: string): { lat: number; lng: number; borough: string } {
+function geocodeArea(area?: string, city?: string): { lat: number; lng: number; borough: string } {
   const a = (area || "").toLowerCase();
+  const c = (city || "").toLowerCase();
+
+  // A known non-London UK city wins first — never fall into London geocoding.
+  if (c && !c.includes("london")) {
+    for (const key of Object.keys(UK_CITY_GEO)) {
+      if (c.includes(key) || a.includes(key)) return UK_CITY_GEO[key];
+    }
+    // Outside London but city unknown → neutral central-UK point, non-London borough.
+    return { lat: 52.8 + (Math.random() - 0.5) * 0.4, lng: -1.8 + (Math.random() - 0.5) * 0.4, borough: "United Kingdom" };
+  }
+
+  // London (city blank or explicitly "London") → precise neighbourhood/borough.
   for (const key of Object.keys(AREA_GEO)) {
     if (a.includes(key)) return AREA_GEO[key];
   }
-  return { lat: 51.5074 + (Math.random() - 0.5) * 0.06, lng: -0.1278 + (Math.random() - 0.5) * 0.09, borough: area || "London" };
+  return { lat: 51.5074 + (Math.random() - 0.5) * 0.06, lng: -0.1278 + (Math.random() - 0.5) * 0.09, borough: "Westminster" };
 }
 
 function normaliseCuisine(c?: string): string {
@@ -117,6 +164,8 @@ export function prepareOpenings(
       (lower.length >= 6 ? existing.find((r) => r.name.toLowerCase().includes(lower)) : undefined);
 
     if (known) {
+      // Respect an explicit "Remove as new" — never resurrect a dismissed venue.
+      if (known.dismissedAsNew) continue;
       toUpdate[known.id] = {
         openingStatus: status,
         openingEvidence: evidence,
@@ -127,10 +176,10 @@ export function prepareOpenings(
       continue;
     }
 
-    const geo = geocodeArea(o.area);
+    const geo = geocodeArea(o.area, o.city);
     const r = makeRestaurant({
       name,
-      address: o.area || "",
+      address: [o.area, o.city].filter(Boolean).join(", "),
       postcode: "",
       borough: geo.borough,
       latitude: geo.lat,

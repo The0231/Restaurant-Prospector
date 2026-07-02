@@ -21,16 +21,13 @@ import { resolve } from "node:path";
 
 // ── Config ─────────────────────────────────────────────────────────────────────
 
-const FSA_LAT         = 51.5074;
-const FSA_LNG         = -0.1278;
-const FSA_RADIUS      = 10;          // miles — covers Greater London
 const FSA_PAGE_SIZE   = 5000;
 const FSA_BIZ_TYPE    = 1;           // Restaurant / Cafe / Canteen
-const OUTPUT          = "public/london-restaurants.json";
+const OUTPUT          = "public/uk-restaurants.json";
 
 // Only call Google Places for venues scoring at or above this threshold.
 // Keeps API costs down — no point enriching kebab shops or fast-food chains.
-const ENRICH_MIN      = 40;          // out of 100
+const ENRICH_MIN      = 60;          // out of 100
 const ENRICH_TTL_DAYS = 30;          // skip re-enrichment if fresher than this
 const PLACES_CONCURRENCY = 8;        // concurrent Places requests (well under QPS limit)
 
@@ -65,13 +62,22 @@ function loadEnvLocal() {
 loadEnvLocal();
 const GOOGLE_API_KEY = process.env.GOOGLE_PLACES_API_KEY ?? "";
 
+// Supabase Storage: where the base dataset is hosted so the app can refresh it
+// without a redeploy, and where the enrichment cache persists between CI runs.
+const SUPABASE_URL = (process.env.SUPABASE_URL ?? "").replace(/\/$/, "");
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+const BUCKET = process.env.DATASET_BUCKET ?? "datasets";
+const OBJECT = "uk-restaurants.json";
+const STORAGE_ENABLED = Boolean(SUPABASE_URL && SUPABASE_KEY);
+const storageObjectUrl = `${SUPABASE_URL}/storage/v1/object/${BUCKET}/${OBJECT}`;
+const storagePublicUrl = `${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${OBJECT}`;
+
 // ── FSA ────────────────────────────────────────────────────────────────────────
 
 async function getFsaPage(pageNumber) {
   const url =
     `https://api.ratings.food.gov.uk/Establishments?businessTypeId=${FSA_BIZ_TYPE}` +
-    `&pageSize=${FSA_PAGE_SIZE}&pageNumber=${pageNumber}` +
-    `&latitude=${FSA_LAT}&longitude=${FSA_LNG}&maxDistanceLimit=${FSA_RADIUS}`;
+    `&pageSize=${FSA_PAGE_SIZE}&pageNumber=${pageNumber}`;
   const res = await fetch(url, { headers: { "x-api-version": "2", accept: "application/json" } });
   if (!res.ok) throw new Error(`FSA page ${pageNumber} → HTTP ${res.status}`);
   return res.json();
@@ -82,27 +88,82 @@ async function getFsaPage(pageNumber) {
 function detectCuisine(name) {
   const n = name.toLowerCase();
   const has = (...ks) => ks.some((k) => n.includes(k));
-  if (has("pizz", "forno")) return "Pizza & Pasta";
-  if (has("trattor", "osteria", "ristorante", "italian", "cucina", "pasta", "gnocch", "napoli", "milano", "romano", "amalfi", "toscana")) return "Italian";
-  if (has("sushi", "sashimi", "japan", "ramen", "katsu", "izakaya", "wasabi", "sakura", "teriyaki", "bento")) return "Japanese / Sushi";
-  if (has("thai", "bangkok", "lemongrass", "siam")) return "Thai";
-  if (has("chinese", "china", " wok", "noodle", "dim sum", "dumpling", "szechuan", "sichuan", "canton", "peking", "oriental")) return "Chinese";
-  if (has("india", "tandoor", "masala", "curry", "biryani", "bombay", "delhi", "punjab", "balti", "tikka")) return "Indian";
-  if (has("burger", "patty", "smash")) return "Burgers";
-  if (has("fried chicken", "chicken cottage", "perfect fried", "wings", "chicken shop")) return "Fried chicken";
-  if (has("kebab", "shawarma", "doner", "donner")) return "Kebab";
-  if (has("greek", "souvlaki", "mykonos", "athena", "gyros")) return "Greek";
-  if (has("tapas", "spanish", "iberica", "tapeo", "catalan")) return "Spanish / Tapas";
-  if (has("lebanese", "turkish", "persian", "beirut", "ottoman", "levant", "mezze", "meze", "falafel", "anatolia", "kurdish", "arabic")) return "Middle Eastern";
-  if (has("mediterran")) return "Mediterranean";
-  if (has("brasserie", "french", "maison", "bistro", "provence")) return "French";
-  if (has("steak", "grill", "smokehouse")) return "Steakhouse";
-  if (has("seafood", "oyster", "fishery", "prawn", "lobster")) return "Seafood";
-  if (has("british", "chop house", "carvery", "sunday roast", "pie & mash", "pie and mash", "fish & chips", "fish and chips", "rib room")) return "British";
-  if (has("vegan", "plant based", "vegetarian")) return "Vegan / Plant-based";
-  if (has("deli", "delicatessen", "larder")) return "Deli / Mediterranean";
-  if (has("pub", "tavern", " arms", " inn", " tap", "alehouse")) return "Gastro-pub";
-  if (has("cafe", "caffe", "coffee", "espresso", "costa", "starbucks", "pret", "barista", "bakery", "patisserie")) return "Cafe / Coffee";
+  // Pizza / pasta first — high signal
+  if (has("pizz", "forno", "pizza express", "zizzi", "prezzo")) return "Pizza & Pasta";
+  // Italian
+  if (has("trattor", "osteria", "ristorante", "italian", "cucina", "pasta", "gnocch", "napoli", "naples",
+           "milano", "milan", "romano", "amalfi", "toscana", "venezia", "venice", "sicilia", "firenze",
+           "sardinia", "puglia", "al dente", "al forno", "la dolce", "la trattoria", "la pasta",
+           "la cucina", "la famiglia", "la piazza", "bella italia", "fratelli", "al porto")) return "Italian";
+  // Japanese
+  if (has("sushi", "sashimi", "japan", "ramen", "katsu", "izakaya", "wasabi", "sakura",
+           "teriyaki", "bento", "udon", "tonkotsu", "yakitori", "wagyu", "miso", "omakase",
+           "nobu", "matsuri", "zuma", "roka", "kikuchi", "engawa", "kurobuta")) return "Japanese / Sushi";
+  // Thai
+  if (has("thai", "bangkok", "lemongrass", "siam", "pad thai", "som tam", "khao", "lotus thai")) return "Thai";
+  // Chinese
+  if (has("chinese", "china", " wok", "noodle", "dim sum", "dumpling", "szechuan", "sichuan",
+           "canton", "peking", "oriental", "yum cha", "hot pot", "baozi", "xiao long",
+           "hutong", "ping pong", "hakkasan", "yauatcha")) return "Chinese";
+  // Indian
+  if (has("india", "tandoor", "masala", "curry", "biryani", "bombay", "delhi", "punjab",
+           "balti", "tikka", "chutney", "lassi", "dal ", "dosa", "naan", "chai",
+           "dishoom", "gymkhana", "benares", "tamarind")) return "Indian";
+  // Korean
+  if (has("korean", "bibimbap", "kimchi", "pojang", "seoul", "jjigae", "galbi")) return "Other / Unknown";
+  // Mexican / Latin
+  if (has("mexican", "taco", "burrito", "guacamol", "jalap", "nacho", "fajita", "quesadill",
+           "hacienda", "wahaca", "tortilla")) return "Other / Unknown";
+  // Burgers
+  if (has("burger", "patty", "smash", "shake shack", "five guys", "honest burger",
+           "dirty burger", "bleecker")) return "Burgers";
+  // Fried chicken
+  if (has("fried chicken", "chicken cottage", "perfect fried", "chicken shop", "kfc",
+           "popeyes", "nando")) return "Fried chicken";
+  // Wings (keep separate from fried chicken shop)
+  if (has(" wings") && has("bar", "sports", "american")) return "Fried chicken";
+  // Kebab
+  if (has("kebab", "shawarma", "doner", "donner", "iskender")) return "Kebab";
+  // Greek
+  if (has("greek", "souvlaki", "mykonos", "athena", "gyros", "taverna", "hellenic",
+           "crete", "athens", "cyprus", "mezedopolio")) return "Greek";
+  // Spanish / Tapas
+  if (has("tapas", "spanish", "iberica", "tapeo", "catalan", "paella", "bodega",
+           "andalucia", "rioja", "pintxo", "basque")) return "Spanish / Tapas";
+  // Middle Eastern
+  if (has("lebanese", "turkish", "persian", "beirut", "ottoman", "levant", "mezze", "meze",
+           "falafel", "anatolia", "kurdish", "arabic", "hummus", "fattoush", "arabian",
+           "maroush", "noura", "ranoush", "comptoir libanais")) return "Middle Eastern";
+  // Mediterranean (broad)
+  if (has("mediterran", "riviera")) return "Mediterranean";
+  // French
+  if (has("brasserie", "french", "maison", "bistro", "provence", "bordeaux", "lyon",
+           "normandy", "alsace", "escargot", "coq au vin", "bouillabaisse", "crepe",
+           "le gavroche", "la petite", "le manoir", "boulestin")) return "French";
+  // Steakhouse / Grill
+  if (has("steak", "grill", "smokehouse", "bbq", "barbecue", "smoked", "hawksmoor",
+           "goodman", "maze grill", "chop house", "cut ")) return "Steakhouse";
+  // Seafood
+  if (has("seafood", "oyster", "fishery", "prawn", "lobster", "crab", "fish market",
+           "scott's", "j sheekey", "sheekey", "bentley's", "fishmonger")) return "Seafood";
+  // British / Modern British
+  if (has("british", "carvery", "sunday roast", "pie & mash", "pie and mash",
+           "fish & chips", "fish and chips", "chippy", "chip shop", "rib room",
+           "afternoon tea", "claret", "the ivy", "rules restaurant",
+           "roast ", " roast", "pudding", "yorkshire")) return "British";
+  // Vegan / Plant-based
+  if (has("vegan", "plant based", "plant-based", "vegetarian", "veggie")) return "Vegan / Plant-based";
+  // Deli / Mediterranean
+  if (has("deli", "delicatessen", "larder", "charcuterie", "épicerie")) return "Deli / Mediterranean";
+  // Gastro-pub
+  if (has("pub", "tavern", " arms", " inn", " tap", "alehouse", "gastropub", "freehouse")) return "Gastro-pub";
+  // Cafe / Coffee (check before generic "kitchen" etc.)
+  if (has("cafe", "caffe", "coffee", "espresso", "costa", "starbucks", "pret", "barista",
+           "bakery", "patisserie", "boulangerie", "croissant", "brunch cafe")) return "Cafe / Coffee";
+  // Modern European — fine dining signals with no stronger cuisine match
+  if (has("modern european", "fine dining", "tasting menu", "atelier", "chef's table")) return "Modern European";
+  // Hotel restaurants are often Modern European
+  if (has(" hotel ") || n.startsWith("hotel ")) return "Modern European";
   return "Other / Unknown";
 }
 
@@ -127,7 +188,7 @@ const CUISINE_COMPAT = {
   "Deli / Mediterranean": 0.68, "French": 0.65, "Gastro-pub": 0.62,
   "Greek": 0.6, "Pizza & Pasta": 0.6, "Spanish / Tapas": 0.58,
   "British": 0.55, "Seafood": 0.5, "Steakhouse": 0.48,
-  "Vegan / Plant-based": 0.45, "Other / Unknown": 0.3,
+  "Vegan / Plant-based": 0.45, "Other / Unknown": 0.4,
   "Middle Eastern": 0.2, "Cafe / Coffee": 0.2, "Indian": 0.2,
   "Chinese": 0.2, "Thai": 0.2, "Japanese / Sushi": 0.1,
   "Burgers": 0.0, "Fried chicken": 0.0, "Kebab": 0.0,
@@ -170,8 +231,9 @@ async function enrichWithPlaces(venue) {
         textQuery: query,
         locationBias: {
           circle: {
-            center: { latitude: FSA_LAT, longitude: FSA_LNG },
-            radius: 30000.0, // 30 km — covers all of Greater London
+            // Use the venue's own coordinates so the bias works for any UK location
+            center: { latitude: venue.latitude, longitude: venue.longitude },
+            radius: 500.0, // 500 m — tight bias around the exact venue
           },
         },
         maxResultCount: 1,
@@ -236,27 +298,85 @@ function isStale(dateStr) {
   return Date.now() - new Date(dateStr).getTime() > ENRICH_TTL_DAYS * 86_400_000;
 }
 
+// ── Supabase Storage (base dataset host + enrichment cache) ─────────────────────
+
+// Create the bucket (public) if it doesn't exist yet — makes first-time setup
+// a no-op beyond providing the Supabase env vars.
+async function ensureBucket() {
+  const check = await fetch(`${SUPABASE_URL}/storage/v1/bucket/${BUCKET}`, {
+    headers: { Authorization: `Bearer ${SUPABASE_KEY}` },
+  });
+  if (check.ok) return;
+  const res = await fetch(`${SUPABASE_URL}/storage/v1/bucket`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${SUPABASE_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ id: BUCKET, name: BUCKET, public: true }),
+  });
+  if (!res.ok && res.status !== 409) {
+    console.warn(`  Bucket create ${res.status}: ${(await res.text()).slice(0, 160)}`);
+  } else {
+    console.log(`Created public Storage bucket "${BUCKET}".`);
+  }
+}
+
+// Pull the last uploaded dataset so enrichment/firstSeen carry over between runs.
+async function downloadPreviousFromStorage() {
+  try {
+    const res = await fetch(storageObjectUrl, { headers: { Authorization: `Bearer ${SUPABASE_KEY}` } });
+    if (res.status === 404) return null; // first run — nothing uploaded yet
+    if (!res.ok) {
+      console.warn(`  Storage download ${res.status}`);
+      return null;
+    }
+    return await res.json();
+  } catch (e) {
+    console.warn(`  Storage download error: ${e.message}`);
+    return null;
+  }
+}
+
+async function uploadToStorage(payloadStr) {
+  const res = await fetch(storageObjectUrl, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${SUPABASE_KEY}`,
+      "Content-Type": "application/json",
+      "x-upsert": "true", // overwrite the existing object
+      "cache-control": "max-age=86400",
+    },
+    body: payloadStr,
+  });
+  if (!res.ok) throw new Error(`Storage upload ${res.status}: ${(await res.text()).slice(0, 200)}`);
+}
+
 // ── Main ───────────────────────────────────────────────────────────────────────
 
 async function main() {
   const todayStr = today();
 
-  // 1. Load existing JSON to preserve enrichment cache and diff against it
+  // 1. Load the previous dataset to preserve the enrichment cache and diff
+  //    against it. Prefer Supabase Storage (survives CI runs) then local disk.
   const prevById = new Map(); // fhrsId (string) → previous venue record
-  if (existsSync(OUTPUT)) {
+  let prev = null;
+  if (STORAGE_ENABLED) {
+    await ensureBucket();
+    prev = await downloadPreviousFromStorage();
+    if (prev) console.log(`Loaded previous dataset from Supabase Storage (${prev.venues?.length ?? 0} venues).`);
+  }
+  if (!prev && existsSync(OUTPUT)) {
     try {
-      const prev = JSON.parse(readFileSync(OUTPUT, "utf8"));
-      for (const v of prev.venues ?? []) {
-        prevById.set(v.id.replace("fsa-", ""), v);
-      }
-      console.log(`Loaded ${prevById.size} venues from existing ${OUTPUT}`);
+      prev = JSON.parse(readFileSync(OUTPUT, "utf8"));
+      console.log(`Loaded previous dataset from ${OUTPUT}.`);
     } catch {
       console.warn("Could not parse existing JSON — starting fresh.");
     }
   }
+  if (prev) {
+    for (const v of prev.venues ?? []) prevById.set(v.id.replace("fsa-", ""), v);
+  }
 
   // 2. Fetch FSA
-  console.log(`\nFetching FSA establishments within ${FSA_RADIUS} miles of central London…`);
+  console.log(`\nFetching FSA establishments UK-wide…`);
   const seen = new Set();
   const fsaRaw = [];
   let page = 1, total = Infinity;
@@ -276,7 +396,7 @@ async function main() {
     }
     console.log(`  page ${page}: ${fsaRaw.length} / ${total}`);
     page++;
-    if (page > 12) break; // safety
+    if (page > 40) break; // safety (UK-wide needs ~28 pages)
   }
 
   // 3. Build venue records — diff against previous run
@@ -290,7 +410,12 @@ async function main() {
 
     const name   = titleCase(e.BusinessName || "Unknown");
     const postcode = (e.PostCode || "").toUpperCase();
-    const cuisine  = detectCuisine(e.BusinessName || "");
+    // Preserve a previously classified cuisine (fix-cuisine / AI) unless it was
+    // still unclassified ("Other / Unknown") — then re-run detection.
+    const detectedCuisine = detectCuisine(e.BusinessName || "");
+    const cuisine = (prev?.cuisineType && prev.cuisineType !== "Other / Unknown")
+      ? prev.cuisineType
+      : detectedCuisine;
     const addr   = [e.AddressLine1, e.AddressLine2, e.AddressLine3, e.AddressLine4]
       .filter((x) => x?.trim()).map(titleCase).join(", ");
     const lat    = Number(parseFloat(e.geocode.latitude).toFixed(5));
@@ -308,7 +433,7 @@ async function main() {
       name,
       address: addr,
       postcode,
-      borough:      e.LocalAuthorityName || "London",
+      borough:      e.LocalAuthorityName || "Unknown",
       latitude:     lat,
       longitude:    lng,
       hygieneRating: Number.isFinite(rating) ? rating : undefined,
@@ -376,12 +501,22 @@ async function main() {
   mkdirSync("public", { recursive: true });
   const payload = {
     generatedAt: todayStr,
-    source:      "Food Standards Agency + Google Places — Greater London",
+    source:      "Food Standards Agency + Google Places — UK",
     totalCount:  venues.length,
     newThisRun:  newCount,
     venues,
   };
-  writeFileSync(OUTPUT, JSON.stringify(payload));
+  const payloadStr = JSON.stringify(payload);
+  writeFileSync(OUTPUT, payloadStr);
+
+  if (STORAGE_ENABLED) {
+    await uploadToStorage(payloadStr);
+    console.log(`\nUploaded dataset to Supabase Storage bucket "${BUCKET}".`);
+    console.log(`  Set this as NEXT_PUBLIC_DATASET_URL (locally + in Vercel):`);
+    console.log(`  ${storagePublicUrl}`);
+  } else {
+    console.log(`\n(Supabase env vars not set — wrote local file only, no upload.)`);
+  }
 
   // Summary
   const withPhone   = venues.filter((v) => v.phone).length;

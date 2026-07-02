@@ -43,6 +43,13 @@ const SCORE_ROWS: { key: keyof ScoreBreakdown; label: string; max: number }[] = 
   { key: "priceFit", label: "Price point fit", max: 50 },
 ];
 
+function barColor(val: number, max: number): string {
+  const pct = val / max;
+  if (pct >= 0.6) return "bg-green-500";
+  if (pct >= 0.35) return "bg-amber-400";
+  return "bg-red-500";
+}
+
 export default function RestaurantProfile() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
@@ -95,7 +102,7 @@ export default function RestaurantProfile() {
                   <div key={key} className="flex items-center gap-3">
                     <div className="w-36 shrink-0 text-sm text-slate-600">{label}</div>
                     <div className="h-2 flex-1 rounded-full bg-slate-100">
-                      <div className="h-2 rounded-full bg-brand-500" style={{ width: `${(val / max) * 100}%` }} />
+                      <div className={`h-2 rounded-full ${barColor(val, max)}`} style={{ width: `${(val / max) * 100}%` }} />
                     </div>
                     <div className="w-14 shrink-0 text-right text-sm font-medium text-slate-700">{val}/{max}</div>
                   </div>
@@ -135,6 +142,15 @@ export default function RestaurantProfile() {
             <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-3">
               <span className="text-sm text-slate-500">Outreach</span>
               <OutreachBadge status={r.outreachStatus} />
+            </div>
+            <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-3">
+              <span className="text-sm text-slate-500">{r.excluded ? "Excluded from pipeline" : "In pipeline"}</span>
+              <button
+                onClick={() => updateRestaurant(r.id, { excluded: !r.excluded })}
+                className={`rounded-lg px-3 py-1 text-xs font-medium transition ${r.excluded ? "bg-slate-100 text-slate-600 hover:bg-slate-200" : "bg-red-50 text-red-700 hover:bg-red-100"}`}
+              >
+                {r.excluded ? "Un-exclude" : "Exclude"}
+              </button>
             </div>
             <div className="mt-3 flex gap-2">
               <a
@@ -212,6 +228,7 @@ function ContactLog({ r, onChange }: { r: Restaurant; onChange: (log: ContactNot
   const [author, setAuthor] = useState("");
   const [outcome, setOutcome] = useState<ContactOutcome>("called");
   const [text, setText] = useState("");
+  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
 
   function add() {
     const body = text.trim();
@@ -221,7 +238,7 @@ function ContactLog({ r, onChange }: { r: Restaurant; onChange: (log: ContactNot
       author: author.trim() || "Sales team",
       text: body,
       outcome,
-      at: new Date().toISOString(),
+      at: new Date(date + "T12:00:00").toISOString(),
     };
     onChange([note, ...log]); // newest first
     setText(""); // keep author + outcome for quick repeat logging
@@ -255,6 +272,12 @@ function ContactLog({ r, onChange }: { r: Restaurant; onChange: (log: ContactNot
               <option key={o} value={o}>{OUTCOME_LABELS[o]}</option>
             ))}
           </select>
+          <input
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm outline-none focus:border-brand-500"
+          />
         </div>
         <textarea
           value={text}

@@ -1,0 +1,27 @@
+name: Weekly FSA dataset refresh
+
+# Refreshes the base FSA venue dataset and uploads it to Supabase Storage, so
+# the app picks up new/updated restaurants without a redeploy. The enrichment
+# cache lives in the uploaded blob, so each run only re-enriches new/stale venues.
+
+on:
+  schedule:
+    - cron: "0 4 * * 1" # Mondays 04:00 UTC
+  workflow_dispatch: {} # allow manual runs from the Actions tab
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Refresh FSA dataset → Supabase Storage
+        env:
+          GOOGLE_PLACES_API_KEY: ${{ secrets.GOOGLE_PLACES_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          DATASET_BUCKET: datasets
+        run: node scripts/fetch-fsa.mjs

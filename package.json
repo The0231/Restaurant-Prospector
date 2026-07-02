@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --experimental-https --experimental-https-key ./certificates-lan/lan-key.pem --experimental-https-cert ./certificates-lan/lan.pem",
     "build": "next build",
     "start": "next start",
     "lint": "next lint"
@@ -15,6 +15,7 @@
     "leaflet.markercluster": "^1.5.3",
     "lucide-react": "^0.456.0",
     "next": "14.2.18",
+    "powerbi-client": "^2.23.10",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-leaflet": "^4.2.1",

@@ -42,7 +42,7 @@ const leadLabel: Record<LeadCategory, string> = {
   high: "High priority",
   good: "Good lead",
   possible: "Possible",
-  low: "Low / excluded",
+  low: "Low priority",
 };
 
 export function LeadBadge({ category }: { category: LeadCategory }) {
@@ -76,6 +76,35 @@ const outreachLabel: Record<OutreachStatus, string> = {
   converted: "Converted",
   unsubscribed: "Unsubscribed",
 };
+
+export function ConvertedBadge() {
+  return (
+    <span className="inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700 ring-1 ring-inset ring-blue-600/20">
+      Converted
+    </span>
+  );
+}
+
+function timeSince(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(ms / 60000);
+  if (mins < 60) return `${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h`;
+  const days = Math.floor(hrs / 24);
+  if (days < 7) return `${days}d`;
+  const weeks = Math.floor(days / 7);
+  if (weeks < 8) return `${weeks}w`;
+  return `${Math.floor(days / 30)}mo`;
+}
+
+export function ContactedBadge({ lastAt }: { lastAt: string }) {
+  return (
+    <span className="inline-flex items-center rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-700 ring-1 ring-inset ring-purple-600/20">
+      Contacted · {timeSince(lastAt)}
+    </span>
+  );
+}
 
 export function OutreachBadge({ status }: { status: OutreachStatus }) {
   return (

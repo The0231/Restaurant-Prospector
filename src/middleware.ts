@@ -6,7 +6,9 @@ import { SESSION_COOKIE } from "@/lib/auth";
 // cookie; otherwise the user is redirected to /login. This is the seam where
 // you plug in real session verification (e.g. validate a Supabase JWT here).
 
-const PUBLIC_PATHS = ["/login", "/api/login"];
+// /api/sync-customers is a Vercel Cron endpoint — it has no session cookie, so
+// it must bypass the login gate. It protects itself with CRON_SECRET instead.
+const PUBLIC_PATHS = ["/login", "/api/login", "/api/sync-customers"];
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;

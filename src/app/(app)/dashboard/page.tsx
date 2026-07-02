@@ -7,14 +7,15 @@ import { Mail, Sparkles, Users } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { StatCard } from "@/components/StatCard";
 import { Funnel } from "@/components/Funnel";
-import { LeadBadge, OutreachBadge, PriceTag } from "@/components/StatusBadge";
+import { ConvertedBadge, ContactedBadge, LeadBadge, OutreachBadge, PriceTag } from "@/components/StatusBadge";
 import { funnelCounts } from "@/lib/mock-data";
 import { useRestaurants } from "@/lib/store";
+import { getRegion } from "@/lib/locations";
 
 const LIST_LIMIT = 50;
 
 export default function DashboardPage() {
-  const { restaurants, loading, updateRestaurant } = useRestaurants();
+  const { restaurants, loading, updateRestaurant, londonOnly } = useRestaurants();
   const router = useRouter();
   const [q, setQ] = useState("");
 
@@ -60,7 +61,7 @@ export default function DashboardPage() {
     <div>
       <PageHeader
         title="Dashboard"
-        subtitle="Your London restaurant pipeline at a glance — week of 29 June 2026"
+        subtitle={`Your ${londonOnly ? "London" : "UK"} restaurant pipeline at a glance`}
         action={
           <Link href="/add" className="rounded-lg bg-brand-500 px-3 py-2 text-sm font-semibold text-white hover:bg-brand-600">
             + Add customer
@@ -70,7 +71,7 @@ export default function DashboardPage() {
 
       {/* KPI cards */}
       <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6">
-        <StatCard label="London venues" value={loading ? "…" : f.total.toLocaleString()} sub="real FSA data" />
+        <StatCard label={londonOnly ? "London venues" : "UK venues"} value={loading ? "…" : f.total.toLocaleString()} sub="real FSA data" />
         <StatCard label="Best fits" value={loading ? "…" : f.recommended.toLocaleString()} accent="green" sub="cuisine + price" />
         <StatCard label="Existing customers" value={f.customers} accent="blue" sub="already buying" />
         <StatCard label="Emails ready" value={draftsReady} accent="purple" sub="to review" />
@@ -95,7 +96,7 @@ export default function DashboardPage() {
                 <li key={r.id} className="flex items-center justify-between gap-2">
                   <div className="min-w-0">
                     <Link href={`/restaurants/${r.id}`} className="block truncate text-sm font-medium text-slate-800 hover:text-brand-600">{r.name}</Link>
-                    <p className="truncate text-xs text-slate-400">{r.cuisineType} · {r.borough} · <PriceTag tier={r.priceTier} /></p>
+                    <p className="truncate text-xs text-slate-400">{r.cuisineType} · {londonOnly ? r.borough : getRegion(r.borough, r.postcode)} · <PriceTag tier={r.priceTier} /></p>
                   </div>
                   <span className="shrink-0 text-sm font-semibold text-green-600">{r.leadScore}</span>
                 </li>
@@ -121,7 +122,7 @@ export default function DashboardPage() {
                 <li key={r.id} className="flex items-center justify-between gap-2">
                   <div className="min-w-0">
                     <Link href={`/restaurants/${r.id}`} className="block truncate text-sm font-medium text-slate-800 hover:text-brand-600">{r.name}</Link>
-                    <p className="truncate text-xs text-slate-400">{r.cuisineType} · {r.borough}</p>
+                    <p className="truncate text-xs text-slate-400">{r.cuisineType} · {londonOnly ? r.borough : getRegion(r.borough, r.postcode)}</p>
                   </div>
                   <OutreachBadge status={r.outreachStatus} />
                 </li>
@@ -159,10 +160,10 @@ export default function DashboardPage() {
           <h2 className="text-sm font-semibold text-slate-900">Prospecting funnel</h2>
           <span className="text-xs text-slate-400">how {f.total.toLocaleString()} venues narrow to customers</span>
         </div>
-        <p className="mb-4 text-xs text-slate-500">Every London venue → filtered by cuisine → scored for fit → contacted → converted.</p>
+        <p className="mb-4 text-xs text-slate-500">{londonOnly ? "Every London venue" : "Every UK venue"} → filtered by cuisine → scored for fit → contacted → converted.</p>
         <Funnel
           stages={[
-            { label: "All London venues", value: f.total },
+            { label: londonOnly ? "All London venues" : "All UK venues", value: f.total },
             { label: "Worth contacting", value: f.relevant },
             { label: "Scored prospects", value: f.scored },
             { label: "Best fits", value: f.recommended },
@@ -188,7 +189,7 @@ export default function DashboardPage() {
             <thead className="sticky top-0 bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
               <tr>
                 <th className="px-4 py-2">Restaurant</th>
-                <th className="px-4 py-2">Borough</th>
+                <th className="px-4 py-2">{londonOnly ? "Borough" : "Area"}</th>
                 <th className="px-4 py-2">Cuisine</th>
                 <th className="px-4 py-2">Price</th>
                 <th className="px-4 py-2">Score</th>
@@ -202,11 +203,17 @@ export default function DashboardPage() {
                     <Link href={`/restaurants/${r.id}`} className="font-medium text-slate-800 hover:text-brand-600">{r.name}</Link>
                     {r.existingCustomer && <span className="ml-2 rounded bg-blue-100 px-1.5 py-0.5 text-xs text-blue-700">Customer</span>}
                   </td>
-                  <td className="px-4 py-2 text-slate-600">{r.borough}</td>
+                  <td className="px-4 py-2 text-slate-600">{londonOnly ? r.borough : getRegion(r.borough, r.postcode)}</td>
                   <td className="px-4 py-2 text-slate-600">{r.cuisineType}</td>
                   <td className="px-4 py-2"><PriceTag tier={r.priceTier} /></td>
                   <td className="px-4 py-2 font-semibold text-slate-800">{r.leadScore}</td>
-                  <td className="px-4 py-2">{r.existingCustomer ? <OutreachBadge status={r.outreachStatus} /> : <LeadBadge category={r.leadCategory} />}</td>
+                  <td className="px-4 py-2">
+                    {r.existingCustomer
+                      ? <ConvertedBadge />
+                      : r.contactLog?.length
+                        ? <ContactedBadge lastAt={r.contactLog.reduce((a, b) => a.at > b.at ? a : b).at} />
+                        : <LeadBadge category={r.leadCategory} />}
+                  </td>
                 </tr>
               ))}
             </tbody>

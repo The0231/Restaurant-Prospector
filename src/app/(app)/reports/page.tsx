@@ -51,7 +51,7 @@ export default function ReportsPage() {
 
   return (
     <div>
-      <PageHeader title="Reports" subtitle={loading ? "Loading…" : "Pipeline, fit and outreach metrics across your London database"} />
+      <PageHeader title="Reports" subtitle={loading ? "Loading…" : "Pipeline, fit and outreach metrics across your UK database"} />
 
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4 xl:grid-cols-6">
         <StatCard label="Venues" value={loading ? "…" : f.total.toLocaleString()} />

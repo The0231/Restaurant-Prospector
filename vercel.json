@@ -1,0 +1,12 @@
+{
+  "crons": [
+    {
+      "path": "/api/sync-customers",
+      "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/scan-openings",
+      "schedule": "0 */6 * * *"
+    }
+  ]
+}

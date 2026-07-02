@@ -16,7 +16,7 @@ export default function MapPage() {
     <div className="flex h-full flex-col">
       <PageHeader
         title="Map"
-        subtitle="Geographic view of all London prospects, new openings and customers"
+        subtitle="Geographic view of all prospects, new openings and customers"
       />
       <div className="min-h-0 flex-1">
         <MapView />

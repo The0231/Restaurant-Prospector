@@ -1,4 +1,6 @@
 import { PageHeader } from "@/components/PageHeader";
+import { DisplayPreferences } from "./DisplayPreferences";
+import { MigrateLocalData } from "@/components/MigrateLocalData";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -9,7 +11,21 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
+function StatusBadge({ connected }: { connected: boolean }) {
+  return connected ? (
+    <span className="rounded bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">Connected</span>
+  ) : (
+    <span className="rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-500">Not connected</span>
+  );
+}
+
 export default function SettingsPage() {
+  // Server component: env vars are read on the server and only the resulting
+  // booleans are sent to the browser — the secret values never leave the server.
+  const hasGooglePlaces = Boolean(process.env.GOOGLE_PLACES_API_KEY);
+  const hasSupabase = Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
+  const hasAnthropic = Boolean(process.env.ANTHROPIC_API_KEY);
+
   return (
     <div>
       <PageHeader
@@ -17,20 +33,45 @@ export default function SettingsPage() {
         subtitle="Integrations, scoring rules and compliance — connect real services here later."
       />
 
+      <div className="mb-4">
+        <MigrateLocalData />
+      </div>
+
       <div className="grid gap-4 lg:grid-cols-2">
         <Section title="Data sources">
           <ul className="space-y-2 text-sm text-slate-600">
-            {[
-              ["Food Standards Agency API", "Not connected"],
-              ["Google Places API", "Not connected"],
-              ["Companies House", "Not connected"],
-              ["Internal CRM / customer list", "Upload CSV"],
-            ].map(([name, status]) => (
-              <li key={name} className="flex items-center justify-between border-b border-slate-100 pb-2">
-                <span>{name}</span>
-                <span className="rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-500">{status}</span>
-              </li>
-            ))}
+            <li className="flex items-center justify-between border-b border-slate-100 pb-2">
+              <div>
+                <span>Food Standards Agency API</span>
+                <p className="text-xs text-slate-400">Bundled — venue data refreshed via fetch-fsa.mjs script</p>
+              </div>
+              <span className="rounded bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">Bundled</span>
+            </li>
+            <li className="flex items-center justify-between border-b border-slate-100 pb-2">
+              <div>
+                <span>Google Places API</span>
+                <p className="text-xs text-slate-400">Enriches phone, website &amp; business status on high-scoring leads</p>
+              </div>
+              <StatusBadge connected={hasGooglePlaces} />
+            </li>
+            <li className="flex items-center justify-between border-b border-slate-100 pb-2">
+              <div>
+                <span>Supabase (shared team data)</span>
+                <p className="text-xs text-slate-400">Syncs contact logs and overrides across the team</p>
+              </div>
+              <StatusBadge connected={hasSupabase} />
+            </li>
+            <li className="flex items-center justify-between border-b border-slate-100 pb-2">
+              <div>
+                <span>Anthropic (AI assistant)</span>
+                <p className="text-xs text-slate-400">Powers the in-app sales assistant and email drafts</p>
+              </div>
+              <StatusBadge connected={hasAnthropic} />
+            </li>
+            <li className="flex items-center justify-between">
+              <span>Companies House</span>
+              <span className="rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-500">Not connected</span>
+            </li>
           </ul>
         </Section>
 
@@ -82,6 +123,10 @@ export default function SettingsPage() {
             Roles: Admin · Sales · Viewer. User management connects to your auth provider
             once the private login is wired up.
           </p>
+        </Section>
+
+        <Section title="Display preferences">
+          <DisplayPreferences />
         </Section>
       </div>
     </div>

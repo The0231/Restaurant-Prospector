@@ -13,6 +13,7 @@ import {
   LogOut,
   Plus,
   Users,
+  ClipboardList,
 } from "lucide-react";
 import { signOut } from "@/lib/auth";
 import { useRestaurants } from "@/lib/store";
@@ -21,6 +22,7 @@ const nav = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/leads", label: "Leads", icon: Table2 },
   { href: "/customers", label: "Customers", icon: Users },
+  { href: "/activity", label: "Activity", icon: ClipboardList },
   { href: "/map", label: "Map", icon: MapIcon },
   { href: "/new-openings", label: "New Openings", icon: Sparkles },
   { href: "/emails", label: "Emails", icon: Mail },

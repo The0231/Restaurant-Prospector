@@ -93,9 +93,18 @@ export interface Restaurant {
   notes?: string;
   // Timestamped log of contact/sales attempts (calls, emails, visits, outcomes).
   contactLog?: ContactNote[];
+  // Customer account fields synced nightly from Power BI (only set once a
+  // venue is matched as an existing customer — see src/lib/customer-sync.ts).
+  customerContactName?: string;
+  customerContactPhone?: string;
+  customerContactEmail?: string;
+  customerAccountManager?: string;
   nextAction?: string;
   openingEvidence?: string;
   expectedOpeningDate?: string;
+  // Set true when someone clicks "Remove as new" — the venue is kept but drops
+  // out of the New openings view, and a later web scan won't re-flag it as new.
+  dismissedAsNew?: boolean;
   // Saved/AI-written outreach email (overrides the default template).
   emailSubject?: string;
   emailBody?: string;

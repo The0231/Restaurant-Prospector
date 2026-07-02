@@ -96,7 +96,7 @@ export default function AddPage() {
     <div className="max-w-3xl">
       <PageHeader
         title="Add customer / restaurant"
-        subtitle="Search the London database and pick a known venue, or enter one manually. Compatibility is scored on cuisine + price."
+        subtitle="Search the UK database and pick a known venue, or enter one manually. Compatibility is scored on cuisine + price."
       />
 
       {/* Known-venue picker */}
